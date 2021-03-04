@@ -5,15 +5,23 @@ import numpy as np
 def clean(df, all_cat = True):
     ## Embarked ##
     df = df[df.Embarked.notna()]
-    
+
     ## Ticket ##
     df['Ticket_unique'] = df.Ticket.apply(lambda x: True if len(df[df.Ticket == x]) == 1 else False)
-    df['Ticket_numeric'] = df.Ticket.apply(lambda x: True if x.isnumeric() else False)
+    #df['Ticket_numeric'] = df.Ticket.apply(lambda x: True if x.isnumeric() else False)
 
     ## Name ##
     # Most common titles
-    titles = ['Dr', 'Master', 'Miss', 'Mr', 'Mrs','Rev']
-    df['Title'] = df.Name.apply(lambda x: x.split(',')[1].split('.')[0].strip() if x.split(',')[1].split('.')[0].strip() in titles else "Other")
+    common = ['Master', 'Miss', 'Mr', 'Mrs', 'Rev', 'Dr']
+    title_map = {'Don' : 'Mr', 'Mme' : 'Mrs', 'Ms' : 'Miss', 'Major' : 'Mr', 
+                'Lady' : 'Mrs', 'Sir' : 'Mr', 'Mlle' : 'Mrs', 
+                'Col' : 'Mr', 'Capt' : 'Mr', 'the Countess' : 'Mrs', 
+                'Jonkheer' : 'Mr', 'Dona' : 'Mrs'}
+    df['Title'] =  df.Name.apply(lambda x:
+            x.split(',')[1].split('.')[0].strip())
+           # if x.split(',')[1].split('.')[0].strip() in common
+           # else "Other")
+    df.loc[~df.Title.isin(common), 'Title'] = df[~df.Title.isin(common)].Title.map(title_map)
 
     ## Cabin ##
     # Number of Cabins assigned
@@ -23,38 +31,48 @@ def clean(df, all_cat = True):
 
     ## Age ##
     # fill null Age values with random numbers drawn from existing distributions 
-    groups = [(s,p) for s in df.Sex.unique() for p in df.Pclass.unique()]
+    groups = [(t,p) for t in df.Title.unique() for p in df.Pclass.unique()]
+  
     rand_age = []
-    for s,p in groups:
-        n_null = len(df[df.Age.isna() & (df.Sex == s) & (df.Pclass == p)])
-        rand_age += random.choices(df[df.Age.notna() & (df.Sex == s) & (df.Pclass == p)].Age.astype(int).to_list(), k = n_null)
+    for (t,p) in groups:
+        n_null = len(df[df.Age.isna() & (df.Title == t) & (df.Pclass == p)])
+        select_from = df[df.Age.notna() & (df.Title == t) & (df.Pclass == p)].Age.astype(int).to_list()
+        if len(select_from) == 0:
+            #select_from = np.ones(n_null) * df[df.Age.notna() & (df.Pclass == p)].Age.mean()
+            select_from = df[df.Age.notna() & (df.Pclass == p)].Age.astype(int).to_list()
+        vals = random.choices(select_from, k = n_null)
+        rand_age += vals
     # fill null values for Age
     df.loc[pd.isna(df.Age), 'Age'] = rand_age
+    df['Age'] = df.Age.astype(int)
     if all_cat == True:
         # bin ages
-        #age_labels = ['0-5', '6-10', '11-15', '16-20', '21-25', '26-30','31-35','36-40','41-50','>50']
-        #age_bins = np.array([0, 5, 10, 15, 20, 25, 30, 35, 40, 50, 100])
-        #df.loc[:,'Age'] = df.Age.apply(lambda x : (x <= age_bins).argmax())
-        df.loc[:,'Age'] = pd.qcut(df.Age, q = 4)    
+        q_age = 20
+        age_bins = pd.qcut(df.Age, q = q_age, retbins = True)[1]
+        age_labels = (age_bins + np.roll(age_bins,-1))[:-1] / 2
+        df.loc[:,'Age'] = pd.qcut(df.Age, q = q_age, labels = age_labels)  
 
     ## Fare ##
-    df = df[df.Fare.notna()]
-    #df['Fare'] = np.log10(df.Fare + 1)
+    mean_fare_pclass = [df[df.Pclass == 1].Fare.mean(),
+                        df[df.Pclass == 2].Fare.mean(),
+                        df[df.Pclass == 3].Fare.mean()]
+    nullfare_pclasses = df[df.Fare.isna()].Pclass.to_list()
+    df.loc[df.Fare.isna(), 'Fare'] = [mean_fare_pclass[p - 1] for p in nullfare_pclasses]
+    df['Fare'] = [np.log10(f + 1) for f in df.Fare]
     if all_cat == True:
-        # Bin the fares into sensible ranges
-        #fare_labels = ['0', '1-7.5','7.5-10', '10-15', '16-25','26-35','36-50','51-100','>100']
-        #fare_bins = np.array([-2, 0, 7.5, 10, 15, 25, 35, 50, 100, 1000])
-        #df.loc[:,'Fare'] = df.Fare.apply(lambda x : (x <= fare_bins).argmax())   
-        df.loc[:,'Fare'] = pd.qcut(df.Fare, q = 4)     
+        q_fare = 15
+        fare_bins = pd.qcut(df.Fare, q = q_fare, retbins = True)[1]
+        fare_labels = (fare_bins + np.roll(fare_bins,-1))[:-1] / 2
+        df.loc[:,'Fare'] = pd.qcut(df.Fare, q = q_fare, labels = fare_labels)
 
     ## Parch / SibSp ##
-    df['Group_size'] = df['Parch'] + df['SibSp']
-    df.drop(columns = ['Parch','SibSp'], inplace = True)
+    #df['Group_size'] = df['Parch'] * df['SibSp']
+    #df.drop(columns = ['Parch','SibSp'], inplace = True)
 
     ## PClass
     df['Pclass'] = df.Pclass.astype(str)
-    
-    drop_cols = ['Cabin','Name','Ticket','PassengerId','Ticket_numeric'] #+ ['Cabin_letter','Num_cabins','Embarked','Group_size']#,'Fare','Ticket_unique']
+
+    drop_cols = ['Cabin','Name','Ticket']
     df.drop(columns = drop_cols, inplace = True)
 
     return df
